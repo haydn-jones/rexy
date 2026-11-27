@@ -18,6 +18,9 @@ use crate::model::{Action, Host};
 /// The command that adds a host, and the one that takes one away.
 pub const ADD: &str = "client.host.add";
 pub const REMOVE: &str = "client.host.remove";
+/// The commands that turn the window to the next host, or the one before.
+pub const NEXT: &str = "client.host.next";
+pub const PREVIOUS: &str = "client.host.previous";
 
 /// A host as it is typed: its name, then its addresses.
 pub fn line(host: &Host) -> String {

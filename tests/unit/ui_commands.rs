@@ -37,6 +37,8 @@ fn standing<'a>(view: &'a View, keys: &'a Keys) -> Standing<'a> {
         back: None,
         removable: false,
         marking: false,
+        server: 0,
+        hosts: &[],
     }
 }
 
@@ -317,6 +319,26 @@ fn hosts_are_added_always_and_removed_while_one_can_be() {
     assert!(opens(false, hosts::ADD) == Some(Listing::Host(None)));
     assert!(opens(true, hosts::REMOVE) == Some(Listing::Hosts));
     assert!(opens(false, hosts::REMOVE).is_none());
+}
+
+#[test]
+fn hosts_are_turned_to_round_and_round_past_those_without_a_session() {
+    let (view, keys) = (View::default(), Keys::default());
+    let turns = |server: usize, hosts: &[bool], name: &str| {
+        let standing = Standing { server, hosts, ..standing(&view, &keys) };
+        match standing.plan(name, &Value::Null, None) {
+            Ok(Deed::Turn(server)) => Some(server),
+            _ => None,
+        }
+    };
+    let hosts = [true, false, true, true];
+    assert_eq!(turns(0, &hosts, hosts::NEXT), Some(2));
+    assert_eq!(turns(3, &hosts, hosts::NEXT), Some(0));
+    assert_eq!(turns(2, &hosts, hosts::PREVIOUS), Some(0));
+    assert_eq!(turns(0, &hosts, hosts::PREVIOUS), Some(3));
+    // Alone with a session, or alone at all, there is nowhere to turn.
+    assert_eq!(turns(0, &[true, false], hosts::NEXT), None);
+    assert_eq!(turns(0, &[true], hosts::PREVIOUS), None);
 }
 
 #[test]

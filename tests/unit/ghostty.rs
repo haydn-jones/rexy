@@ -44,3 +44,83 @@ fn a_configuration_names_the_fonts_of_its_text() {
     // The fonts of one look alone, and a configuration of none, name nothing.
     assert!(families("font-family-bold = Heavy\n# font-family = Gone\ntheme = Day").is_empty());
 }
+
+#[test]
+fn the_theme_follows_the_configuration_as_it_is_saved() {
+    let home = std::env::temp_dir().join(format!("rexy-ghostty-theme-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&home);
+    let (own, elsewhere) = (home.join("ghostty"), home.join("elsewhere"));
+    fs::create_dir_all(own.join("themes")).unwrap();
+    fs::create_dir_all(&elsewhere).unwrap();
+    let (file, config) = (own.join("themes/Mine"), own.join("config"));
+    fs::write(&file, "background = #111111\n").unwrap();
+    fs::write(&config, "theme = Mine\n").unwrap();
+    let mut theme = follow(home.clone());
+    let background = |color: &str| Some(json!({ "background": color }));
+    assert_eq!(*theme.borrow_and_update(), background("#111111"));
+    let mut next = || {
+        let began = std::time::Instant::now();
+        while !theme.has_changed().unwrap() {
+            assert!(began.elapsed() < Duration::from_secs(5), "the theme did not change");
+            thread::sleep(Duration::from_millis(10));
+        }
+        theme.borrow_and_update().clone()
+    };
+    // The theme's own file, written where it is.
+    fs::write(&file, "background = #222222\n").unwrap();
+    assert_eq!(next(), background("#222222"));
+    // The configuration, saved by putting another file in its place.
+    fs::write(own.join("config.new"), "background = #333333\n").unwrap();
+    fs::rename(own.join("config.new"), &config).unwrap();
+    assert_eq!(next(), background("#333333"));
+    // The newer name, which was not there to begin with.
+    fs::write(own.join("config.ghostty"), "background = #444444\n").unwrap();
+    assert_eq!(next(), background("#444444"));
+    // A link to a file kept elsewhere, and that file written where it is kept.
+    fs::remove_file(own.join("config.ghostty")).unwrap();
+    assert_eq!(next(), background("#333333"));
+    fs::write(elsewhere.join("config"), "background = #555555\n").unwrap();
+    fs::remove_file(&config).unwrap();
+    std::os::unix::fs::symlink(elsewhere.join("config"), &config).unwrap();
+    assert_eq!(next(), background("#555555"));
+    fs::write(elsewhere.join("config"), "background = #666666\n").unwrap();
+    assert_eq!(next(), background("#666666"));
+    // Colours that go are not followed: the last are kept.
+    fs::write(elsewhere.join("config"), "# None.\n").unwrap();
+    thread::sleep(SETTLE * 3);
+    assert!(!theme.has_changed().unwrap());
+    assert_eq!(*theme.borrow(), background("#666666"));
+    // With no one to tell, the next change ends the following.
+    drop(theme);
+    fs::remove_dir_all(&home).unwrap();
+}
+
+#[test]
+fn a_theme_with_nowhere_to_hear_of_is_read_once() {
+    let home = std::env::temp_dir().join(format!("rexy-ghostty-none-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&home);
+    assert_eq!(*follow(home).borrow(), None);
+}
+
+#[test]
+fn the_configuration_is_in_either_file_and_the_newer_name_stands_over_the_older() {
+    let home = std::env::temp_dir().join(format!("rexy-ghostty-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&home);
+    fs::create_dir_all(home.join("ghostty")).unwrap();
+    let (old, new) = (home.join("ghostty/config"), home.join("ghostty/config.ghostty"));
+    // Neither.
+    assert_eq!(read_config(&home), None);
+    // The new name alone, as Ghostty writes it now.
+    fs::write(&new, "theme = Gruvbox Dark Hard\n").unwrap();
+    assert!(read_config(&home).unwrap().contains("theme = Gruvbox Dark Hard"));
+    // Both: the old is read first, so that the new one's colours stand.
+    fs::write(&old, "background = #111111\nfont-family = Old").unwrap();
+    fs::write(&new, "background = #222222\nfont-family = New").unwrap();
+    let both = read_config(&home).unwrap();
+    assert_eq!(families(&both), ["Old", "New"]);
+    assert_eq!(read(&both, |_| None), Some(json!({ "background": "#222222" })));
+    // The old name alone.
+    fs::remove_file(&new).unwrap();
+    assert_eq!(families(&read_config(&home).unwrap()), ["Old"]);
+    fs::remove_dir_all(&home).unwrap();
+}
